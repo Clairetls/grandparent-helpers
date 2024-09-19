@@ -259,36 +259,14 @@ pedigree<-pedigree[,c('BirdID', "GeneticMother","GeneticFather","GenMumConfidenc
 
 pedigree<-filter(pedigree, pedigree$GenDadConfidence>=80 & pedigree$GenMumConfidence>=80)
 
-pedigree<-left_join(pedigree,sexestimates, by='BirdID')
-
-
 pedigree<-unique(pedigree)
 pedigree<-pedigree[,c("BirdID", "GeneticMother","GeneticFather")]
 
-pedi<-prunePed(pedigree, keep=unique(combinedchanges$BirdID))
-pedi<-orderPed(pedi)
-rmatrix<-inverseA(pedi)
-
-# install.packages('ribd')
-library(ribd)
-library(MCMCglmm)
-
-pedigree<-pedigree[,c("BirdID","GeneticMother","GeneticFather","SexEstimate")]
-
-names(pedigree)<-c('id','mid','fid','sex')
-
-pedigree<-filter(pedigree, !is.na(pedigree$sex))
-test<-as.ped(pedigree)
-
-test<-ped(pedigree$BirdID, fid = pedigree$GeneticFather, mid = pedigree$GeneticMother, 
-    sex = pedigree$SexEstimate)
 
 
-rtable<-coeffTable(pedigree)
-
-#terminal year? 
-termyear<-changes%>%filter(BirdID %in% deposed$BirdID)
-
+# pedigree<-filter(pedigree, !is.na(pedigree$sex))
+# 
+# rtable<-coeffTable(pedigree)
 
 #2023? 
 # url <- "https://cran.r-project.org/src/contrib/Archive/pedantics/pedantics_1.7.tar.gz"
@@ -297,26 +275,168 @@ termyear<-changes%>%filter(BirdID %in% deposed$BirdID)
 # install.packages('pedantics_1.7.tar')
 # library()
 
-Amatrix<-read.csv('Amatrix.csv')
+install_github("JulienGAMartin/pedtricks")
+library(pedtricks)
 
-i<-1
-Rindivcc[i,c(2)]
-test<-c(i,Rindivcc[i,c(2)])
-length(test)
+names(pedigree)<-c('id','dam','sire')
 
 
-rownames(Amatrix)<-colnames(Amatrix)
+# fix_ped(pedigree)
+
+pedinfo<-ped_stats(pedigree, includeA = T)
+
+Amatrix<-as.matrix(pedinfo[["Amatrix"]])i 
+Amatrix<-as.data.frame(Amatrix)
+
+problematicbirds<-which(Amatrix >1 , arr.ind = T)
+which(Amatrix['526',]>0.5)
+
+
+Amatrix[Amatrix>1]<-1
+range(Amatrix)
+
+# Amatrix<-read.csv('Amatrix.csv')
+
+# pedigrees
+# Rindivcc[i,c(2)]
+# test<-c(i,Rindivcc[i,c(2)])
+# length(test)
+
+
+# rownames(Amatrix)<-colnames(Amatrix)
 
 trial<-data.frame()
 for(i in 1:nrow(Rindivcc)){
   c1<-Rindivcc$BirdID[i]
   c2<-Rindivcc$BrF[i]
   c3<-Rindivcc$BrM[i]
-  withbrf<-Amatrix[paste('X',c1, sep = ''),paste('X',c2,sep = '')]
-  withbrm<-Amatrix[paste('X',c1, sep = ''),paste('X',c3,sep = '')]
+  withbrf<-Amatrix[paste(c1),paste(c2)]
+  withbrm<-Amatrix[paste(c1),paste(c3)]
   if(length(withbrf)==0){withbrf<-NA}
   if(length(withbrm)==0){withbrm<-NA}
-  onerow<-data.frame(BirdID=c1, withbrf=withbrf, withbrm=withbrm)
+  onerow<-data.frame(BirdID=c1, withbrf=withbrf, withbrm=withbrm, BrF=c2, BrM=c3)
   trial<-rbind(trial,onerow)
 }
+
+trial<-unique(trial)
+combinedchanges<-left_join(combinedchanges,trial, by=c('BirdID',"BrF","BrM"))
+nondupchanges<-left_join(nondupchanges, trial, by=c('BirdID',"BrF","BrM"))
+
+
+
+#bodymass 
+bodymass<-read.csv('C:/PhD/Data/modelling dfs for habrok/Dataframes 28_5_24/physio_28_5.csv')
+bodymass<-bodymass[,c("BirdID","FieldPeriodID","BodyMass","RightTarsus","occasionyear")]
+
+test<-left_join(nondupchanges, bodymass, by=c('BirdID',"FieldPeriodID"))
+
+test<-test%>%
+  group_by(BirdID, FieldPeriodID) %>%
+  mutate(
+    BodyMass = mean(BodyMass, na.rm = TRUE),
+    RightTarsus = mean(RightTarsus, na.rm = TRUE)
+  )
+
+test<-unique(test)
+
+
+nondupchanges<-test
+
+test2<-left_join(combinedchanges, bodymass, by=c('BirdID','FieldPeriodID'))
+
+test2<-test2%>%
+  group_by(BirdID, FieldPeriodID) %>%
+  mutate(
+    BodyMass = mean(BodyMass, na.rm = TRUE),
+    RightTarsus = mean(RightTarsus, na.rm = TRUE)
+  )
+
+test2<-unique(test2)
+
+combinedchanges<-test2
+
+#ok done 
+
+write.csv(combinedchanges, 'combinedchanges.csv')
+write.csv(nondupchanges, 'nondupchanges.csv')
+
+
+library(lme4)
+
+combinedchanges$bodycondi<-combinedchanges$BodyMass/combinedchanges$RightTarsus
+nondupchanges$bodycondi<-nondupchanges$BodyMass/nondupchanges$RightTarsus
+
+combinedchanges<-combinedchanges%>%
+  mutate(help=case_when(change=="br2help"~1,
+                        change!='br2help'~0))
+
+nondupchanges<-nondupchanges%>%
+  mutate(help=case_when(change=="br2help"~1,
+                        change!='br2help'~0))
+
+
+combinedchanges<-as.data.frame(combinedchanges)
+nondupchanges<-as.data.frame(nondupchanges)
+
+
+library(GLMMadaptive)
+ccjustdeposed$SexEstimate<-as.factor(ccjustdeposed$SexEstimate)
+ccjustdeposed$occasionyear.x<-as.factor(ccjustdeposed$occasionyear.x)
+
+
+combinedchanges<-read.csv('combinedchanges.csv')
+nondupchanges<-read.csv('nondupchanges.csv')
+ccnonhelp<-filter(combinedchanges,combinedchanges$change!="br2help")
+ccnonhelp2<-na.omit(ccnonhelp)
+cchelp<-filter(combinedchanges,combinedchanges$change=='br2help')
+
+ndcnonhelp<-filter(nondupchanges,nondupchanges$change!="br2help")
+ndcnonhelp<-na.omit(ndcnonhelp)
+ndchelp<-filter(nondupchanges,nondupchanges$change=="br2help")
+
+
+set.seed(1)
+onesample<-sample_n(ccnonhelp, size=35, replace=F)
+ndcsample1<-sample_n(ndcnonhelp, size=35, replace=F)
+
+ndcdf1<-rbind(ndchelp, ndcsample1)
+ndcdf1$occasionyear.x<-as.factor(ndcdf1$occasionyear.x)
+ndcdf1$SexEstimate<-as.factor(ndcdf1$SexEstimate)
+
+ccdf1<-rbind(cchelp,onesample)
+ccdf1$occasionyear.x<-as.factor(ccdf1$occasionyear.x)
+ccdf1$SexEstimate<-as.factor(ccdf1$SexEstimate)
+
+
+test<-filter(combinedchanges, !is.na(combinedchanges$bodycondi))
+
+#if a student needs body condition, they will have to find another indicator 
+#maybe terminal year 
+ccmod1<-glm(help~withbrf+withbrm+popden+avg_invert+age+popden:avg_invert,
+                  data=ccdf1,family = binomial(link='logit'))
+summary(ccmod1)
+
+ndcmod1<-glm(help~withbrf+withbrm+popden+avg_invert+age+popden:avg_invert,
+             data=ndcdf1,family = binomial(link='logit'))
+summary(ndcmod1)
+
+library(DHARMa)
+residccmod1<-testResiduals(ccmod1)
+residndcmod1<-testResiduals(ndcmod1)
+
+ccsr<-simulateResiduals(ccmod1)
+ndcsr<-simulateResiduals(ndcmod1)
+
+plot(ccsr)
+plot(ndcsr)
+
+#resids are okay for these models 
+
+
+#data too zero inflated to compare lifetime breeders vs subords vs grandparenthelper
+#now i have randomly subsetted equiv rows 
+#for masters project or future work, 
+#use bootstrapping, model averaging or cross validation
+#look up raph's code 
+
 
