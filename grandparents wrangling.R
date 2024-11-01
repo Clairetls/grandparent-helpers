@@ -285,7 +285,7 @@ names(pedigree)<-c('id','dam','sire')
 
 pedinfo<-ped_stats(pedigree, includeA = T)
 
-Amatrix<-as.matrix(pedinfo[["Amatrix"]])i 
+Amatrix<-as.matrix(pedinfo[["Amatrix"]]) 
 Amatrix<-as.data.frame(Amatrix)
 
 problematicbirds<-which(Amatrix >1 , arr.ind = T)
@@ -387,50 +387,98 @@ ccjustdeposed$occasionyear.x<-as.factor(ccjustdeposed$occasionyear.x)
 combinedchanges<-read.csv('combinedchanges.csv')
 nondupchanges<-read.csv('nondupchanges.csv')
 ccnonhelp<-filter(combinedchanges,combinedchanges$change!="br2help")
+ccsub<-filter(combinedchanges, combinedchanges$change=='br2sub')
 ccnonhelp2<-na.omit(ccnonhelp)
 cchelp<-filter(combinedchanges,combinedchanges$change=='br2help')
 
-ndcnonhelp<-filter(nondupchanges,nondupchanges$change!="br2help")
-ndcnonhelp<-na.omit(ndcnonhelp)
+ndcsub<-filter(nondupchanges,nondupchanges$change=="br2sub")
+# ndcsub<-na.omit(ndcsub)
 ndchelp<-filter(nondupchanges,nondupchanges$change=="br2help")
 
 
 set.seed(1)
 onesample<-sample_n(ccnonhelp, size=35, replace=F)
-ndcsample1<-sample_n(ndcnonhelp, size=35, replace=F)
+ccsubsample<-sample_n(ccsub, size=35, replace=F)
+ndcsample1<-sample_n(ndcsub, size=35, replace=F)
 
 ndcdf1<-rbind(ndchelp, ndcsample1)
 ndcdf1$occasionyear.x<-as.factor(ndcdf1$occasionyear.x)
 ndcdf1$SexEstimate<-as.factor(ndcdf1$SexEstimate)
 
 ccdf1<-rbind(cchelp,onesample)
+ccdf2<-rbind(cchelp, ccsubsample)
+
 ccdf1$occasionyear.x<-as.factor(ccdf1$occasionyear.x)
 ccdf1$SexEstimate<-as.factor(ccdf1$SexEstimate)
+ccdf2$occasionyear.x<-as.factor(ccdf2$occasionyear.x)
+ccdf2$SexEstimate<-as.factor(ccdf2$SexEstimate)
 
 
 test<-filter(combinedchanges, !is.na(combinedchanges$bodycondi))
 
 #if a student needs body condition, they will have to find another indicator 
 #maybe terminal year 
-ccmod1<-glm(help~withbrf+withbrm+popden+avg_invert+age+popden:avg_invert,
-                  data=ccdf1,family = binomial(link='logit'))
-summary(ccmod1)
+# ccmod1<-glm(help~withbrf+withbrm+popden+avg_invert+age+popden:avg_invert,
+#                   data=ccdf1,family = binomial(link='logit'))
+# 
+# summary(ccmod1)
+
+ccmod2<-glm(help~withbrf+withbrm+popden+avg_invert+age+popden:avg_invert,
+            data=ccdf2,family = binomial(link='logit'))
+summary(ccmod2)
+
+# ccmod2data <- ggpredict(ccmod2, terms=c("popden [all]","avg_invert"))
+# plot(ccmod2data)
+
+ccmod3<-glm(help~withbrf+withbrm+popden+avg_invert+age,
+            data=ccdf2,family = binomial(link='logit'))
+summary(ccmod3)
 
 ndcmod1<-glm(help~withbrf+withbrm+popden+avg_invert+age+popden:avg_invert,
              data=ndcdf1,family = binomial(link='logit'))
 summary(ndcmod1)
 
 library(DHARMa)
-residccmod1<-testResiduals(ccmod1)
+residccmod2<-testResiduals(ccmod2)
 residndcmod1<-testResiduals(ndcmod1)
 
 ccsr<-simulateResiduals(ccmod1)
 ndcsr<-simulateResiduals(ndcmod1)
 
+cc2sr<-simulateResiduals(ccmod2)
+
 plot(ccsr)
 plot(ndcsr)
+plot(cc2sr)
+plot(ccmod1)
+
 
 #resids are okay for these models 
+
+plotdf1<-ccdf1[,c('BirdID', "withbrf",'withbrm',"help")]
+
+plotdf2<-ccdf2[,c('BirdID', "withbrf",'withbrm',"help")]
+
+library(sjPlot)
+tab_model(ccmod2)
+
+library(data.table)
+plotdf1<-as.data.table(plotdf1)
+plotdf2<-as.data.table(plotdf2)
+
+plotdf1<-melt(plotdf1, id.vars=c("BirdID",'help'),measure.vars=c('withbrf','withbrm'), variable.name="r_type")
+plotdf2<-melt(plotdf2, id.vars=c("BirdID",'help'),measure.vars=c('withbrf','withbrm'), variable.name="r_type")
+
+plotdf1<-as.data.frame(plotdf1)
+plotdf2<-as.data.frame(plotdf2)
+
+
+ggplot(plotdf1, aes(y=help, x=value, colour = r_type))+geom_point()+
+  geom_smooth(method='glm', method.args=list(family='binomial'))+xlab('Relatedness')
+
+ggplot(plotdf2, aes(y=help, x=value, colour = r_type))+geom_point()+
+  geom_smooth(method='glm', method.args=list(family='binomial'))+xlab('Relatedness')
+
 
 
 #data too zero inflated to compare lifetime breeders vs subords vs grandparenthelper
@@ -438,5 +486,3 @@ plot(ndcsr)
 #for masters project or future work, 
 #use bootstrapping, model averaging or cross validation
 #look up raph's code 
-
-
